@@ -4,6 +4,8 @@ import inspect
 import gradio as gr
 from PIL import features, Image
 
+from modules import ui_components
+
 from sd_webui_pixelart.utils import (
     DITHER_METHODS, QUANTIZATION_METHODS, downscale_image, limit_colors, 
     resize_image, convert_to_grayscale, convert_to_black_and_white, 
@@ -70,7 +72,7 @@ def on_palette_upload(file_path, existing_text=""):
 
 def create_pixelart_ui(open_accordion=False, label="Pixel art"):
     """
-    Create the complete pixel art UI with accordion and enabled checkbox.
+    Create the complete pixel art UI.
     Returns a dict of all components including 'enabled'.
     
     Args:
@@ -85,8 +87,8 @@ def create_pixelart_ui(open_accordion=False, label="Pixel art"):
 
     components = {}
 
-    with gr.Accordion(label=label, open=open_accordion):
-        components['enabled'] = gr.Checkbox(label="Enable", value=False)
+    with ui_components.InputAccordion(open_accordion, label=label) as enabled:
+        components['enabled'] = enabled
         
         with gr.Row():
             components['downscale'] = gr.Slider(label="Downscale", minimum=1, maximum=64, step=1, value=4)
