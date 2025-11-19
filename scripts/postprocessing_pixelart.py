@@ -4,7 +4,69 @@ from PIL import features
 from modules import scripts_postprocessing
 from modules.shared import opts
 
-from sd_webui_pixelart.utils import DITHER_METHODS, QUANTIZATION_METHODS, downscale_image, limit_colors, resize_image, convert_to_grayscale, convert_to_black_and_white
+from sd_webui_pixelart.utils import DITHER_METHODS, QUANTIZATION_METHODS, downscale_image, limit_colors, resize_image, convert_to_grayscale, convert_to_black_and_white, parse_color_text, create_palette_from_colors, read_palette_file
+
+
+def _colors_to_hex_text(colors):
+    return ", ".join([f"#{r:02X}{g:02X}{b:02X}" for r, g, b in colors])
+
+
+def _merge_and_dedup_colors(existing_text, new_colors):
+    """Merge existing text colors with new_colors (list of RGB tuples), remove duplicates preserving order."""
+    existing = parse_color_text(existing_text) or []
+    combined = existing + (new_colors or [])
+    seen = set()
+    result = []
+    for c in combined:
+        tup = (int(c[0]), int(c[1]), int(c[2]))
+        if tup not in seen:
+            seen.add(tup)
+            result.append(tup)
+    return result
+
+
+def on_palette_upload(file_path, existing_text=""):
+    """
+    Unified callback for palette file upload. Handles both image and text files.
+    Detects file type and extracts colors accordingly.
+    """
+    if not file_path:
+        return existing_text, gr.update(value=None), gr.update(value="", visible=False)
+    
+    # Try to open as image first
+    try:
+        from PIL import Image
+        img = Image.open(file_path)
+        # Successfully opened as image - extract colors
+        img = img.convert('RGB')
+        colors_with_counts = img.getcolors(maxcolors=img.width * img.height)
+        if colors_with_counts:
+            # sort by count desc to prioritize dominant colors
+            colors_sorted = [c for _, c in sorted(colors_with_counts, key=lambda x: -x[0])]
+        else:
+            # fallback: sample up to 1024 pixels and dedupe
+            sample = set()
+            w, h = img.size
+            max_sample = min(w * h, 1024)
+            for i in range(max_sample):
+                px = img.getpixel((i % w, i // w))
+                sample.add((px[0], px[1], px[2]))
+            colors_sorted = list(sample)
+        
+        merged = _merge_and_dedup_colors(existing_text, colors_sorted)
+        color_text = _colors_to_hex_text(merged)
+        return color_text, gr.update(value=None), gr.update(value="", visible=False)
+    except Exception as img_error:
+        # Not an image, try as text file
+        colors, error = read_palette_file(file_path)
+        if error:
+            # Neither valid image nor valid text file
+            return existing_text, gr.update(), gr.update(value=f"<div style='color:red'>File is neither a valid image nor a valid text palette file.<br>Image error: {img_error}<br>Text error: {error}</div>", visible=True)
+        
+        # Successfully parsed as text file
+        merged = _merge_and_dedup_colors(existing_text, colors)
+        color_text = _colors_to_hex_text(merged)
+        return color_text, gr.update(value=None), gr.update(value="", visible=False)
 
 
 class ScriptPostprocessingUpscale(scripts_postprocessing.ScriptPostprocessing):
@@ -46,8 +108,26 @@ class ScriptPostprocessingUpscale(scripts_postprocessing.ScriptPostprocessing):
                             black_and_white_threshold = gr.Slider(label="Threshold", minimum=1, maximum=256, step=1, value=128)
                     with gr.TabItem("Custom color palette"):
                         use_color_palette = gr.Checkbox(label="Enable", value=False)
-                        palette_image=gr.Image(label="Color palette image", type="pil")
-                        palette_colors = gr.Slider(label="Palette Size (only for complex images)", minimum=1, maximum=256, step=1, value=16)
+                        with gr.Column():
+                            palette_text = gr.Textbox(
+                                placeholder="Hex: #FF0000, #00FF00, #0000FF\nRGB: 255,0,0 or (255,0,0)\nSeparate by comma or newline",
+                                lines=4
+                            )
+                            # Error message display (red text, positioned between textbox and file input)
+                            palette_message = gr.HTML(value="", visible=False)
+                            with gr.Row():
+                                palette_upload = gr.File(
+                                    label="Add colors from image or text file",
+                                    file_count="single",
+                                    type="filepath",
+                                    scale=1
+                                )
+                            # Connect file upload to automatically append to text and clear file input
+                            palette_upload.change(
+                                fn=on_palette_upload,
+                                inputs=[palette_upload, palette_text],
+                                outputs=[palette_text, palette_upload, palette_message]
+                            )
                         dither_method_palette = gr.Radio(choices=dither_methods, value=dither_methods[0], label='Colors dither method')
 
         return {
@@ -69,8 +149,8 @@ class ScriptPostprocessingUpscale(scripts_postprocessing.ScriptPostprocessing):
             "use_k_means_grayscale": use_k_means_grayscale,
 
             "use_color_palette": use_color_palette,
-            "palette_image": palette_image,
-            "palette_colors": palette_colors,
+            "palette_text": palette_text,
+            "palette_upload": palette_upload,
             "dither_method_palette": dither_method_palette,
 
             "black_and_white": black_and_white,
@@ -101,8 +181,8 @@ class ScriptPostprocessingUpscale(scripts_postprocessing.ScriptPostprocessing):
             use_k_means_grayscale,
 
             use_color_palette,
-            palette_image,
-            palette_colors,
+            palette_text,
+            palette_upload,
             dither_method_palette,
 
             black_and_white,
@@ -129,12 +209,25 @@ class ScriptPostprocessingUpscale(scripts_postprocessing.ScriptPostprocessing):
             new_image = downscale_image(new_image, downscale)
 
             if use_color_palette:
-                new_image = limit_colors(
-                    image=new_image,
-                    palette=palette_image,
-                    palette_colors=palette_colors,
-                    dither=dither_palette
-                )
+                # Determine which palette to use: text colors or image
+                palette_to_use = None
+
+                # Try to get colors from text input
+                if palette_text and palette_text.strip():
+                    palette_colors_list = parse_color_text(palette_text)
+
+                    # If we have colors from text, create palette
+                    if palette_colors_list:
+                        palette_to_use = create_palette_from_colors(palette_colors_list)
+
+
+                # Apply the palette if we have one
+                if palette_to_use is not None:
+                    new_image = limit_colors(
+                        image=new_image,
+                        palette=palette_to_use,
+                        dither=dither_palette
+                    )
 
             if black_and_white:
                 new_image = convert_to_black_and_white(new_image, black_and_white_threshold, inversed_black_and_white)
