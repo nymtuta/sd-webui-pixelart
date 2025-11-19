@@ -73,6 +73,7 @@ def on_palette_upload(file_path, existing_text=""):
 def create_pixelart_ui(open_accordion=False, label="Pixel art"):
     """
     Create the complete pixel art UI.
+    Active tab determines which processing is applied (no enable checkboxes needed).
     Returns a dict of all components including 'enabled'.
     
     Args:
@@ -94,48 +95,60 @@ def create_pixelart_ui(open_accordion=False, label="Pixel art"):
             components['downscale'] = gr.Slider(label="Downscale", minimum=1, maximum=64, step=1, value=4)
             components['need_rescale'] = gr.Checkbox(label="Rescale to original size", value=False)
         
-        with gr.Tabs():
-            with gr.TabItem("Color"):
-                components['enable_color_limit'] = gr.Checkbox(label="Enable", value=False)
-                components['number_of_colors'] = gr.Slider(label="Palette Size", minimum=1, maximum=256, step=1, value=16)
-                components['quantization_method'] = gr.Radio(choices=quantization_methods, value=quantization_methods[0], label='Colors quantization method')
-                components['dither_method'] = gr.Radio(choices=dither_methods, value=dither_methods[0], label='Colors dither method')
-                components['use_k_means'] = gr.Checkbox(label="Enable k-means for color quantization", value=True)
-            with gr.TabItem("Grayscale"):
-                components['is_grayscale'] = gr.Checkbox(label="Enable", value=False)
-                components['number_of_shades'] = gr.Slider(label="Palette Size", minimum=1, maximum=256, step=1, value=16)
-                components['quantization_method_grayscale'] = gr.Radio(choices=quantization_methods, value=quantization_methods[0], label='Colors quantization method')
-                components['dither_method_grayscale'] = gr.Radio(choices=dither_methods, value=dither_methods[0], label='Colors dither method')
-                components['use_k_means_grayscale'] = gr.Checkbox(label="Enable k-means for color quantization", value=True)
-            with gr.TabItem("Black and white"):
+        gr.Markdown("**Color palette clamping method:**")
+        
+        # State to track which tab is selected (Tabs component itself can't be an input)
+        components['active_tab'] = gr.State(value=0)
+        
+        with gr.Tabs() as tabs:
+            
+            with gr.TabItem("None", id="none"):
+                gr.Markdown("No color palette clamping will be applied. Only downscaling.")
+            
+            with gr.TabItem("From current image", id="color"):
+                components['number_of_colors'] = gr.Slider(label="Palette Size", minimum=1, maximum=256, step=1, value=16, interactive=True)
+                components['quantization_method'] = gr.Radio(choices=quantization_methods, value=quantization_methods[0], label='Colors quantization method', interactive=True)
+                components['dither_method'] = gr.Radio(choices=dither_methods, value=dither_methods[0], label='Colors dither method', interactive=True)
+                components['use_k_means'] = gr.Checkbox(label="Enable k-means for color quantization", value=True, interactive=True)
+            
+            with gr.TabItem("Grayscale", id="grayscale"):
+                components['number_of_shades'] = gr.Slider(label="Number of shades", minimum=1, maximum=256, step=1, value=16, interactive=True)
+                components['quantization_method_grayscale'] = gr.Radio(choices=quantization_methods, value=quantization_methods[0], label='Colors quantization method', interactive=True)
+                components['dither_method_grayscale'] = gr.Radio(choices=dither_methods, value=dither_methods[0], label='Colors dither method', interactive=True)
+                components['use_k_means_grayscale'] = gr.Checkbox(label="Enable k-means for color quantization", value=True, interactive=True)
+            
+            with gr.TabItem("Black and white", id="black_and_white"):
+                components['is_inversed_black_and_white'] = gr.Checkbox(label="Inverse", value=False, interactive=True)
+                components['black_and_white_threshold'] = gr.Slider(label="Threshold", minimum=1, maximum=256, step=1, value=128, interactive=True)
+            
+            with gr.TabItem("Custom", id="custom_palette"):
+                components['palette_text'] = gr.Textbox(
+                    placeholder="Hex: #FF0000, #00FF00, #0000FF\nRGB: 255,0,0 or (255,0,0)\nSeparate by comma or newline",
+                    lines=4,
+                    interactive=True
+                )
+                # Error message display (red text, positioned between textbox and file input)
+                components['palette_message'] = gr.HTML(value="", visible=False)
                 with gr.Row():
-                    components['is_black_and_white'] = gr.Checkbox(label="Enable", value=False)
-                    components['is_inversed_black_and_white'] = gr.Checkbox(label="Inverse", value=False)
-                with gr.Row():
-                    components['black_and_white_threshold'] = gr.Slider(label="Threshold", minimum=1, maximum=256, step=1, value=128)
-            with gr.TabItem("Custom color palette"):
-                components['use_color_palette'] = gr.Checkbox(label="Enable", value=False)
-                with gr.Column():
-                    components['palette_text'] = gr.Textbox(
-                        placeholder="Hex: #FF0000, #00FF00, #0000FF\nRGB: 255,0,0 or (255,0,0)\nSeparate by comma or newline",
-                        lines=4
+                    components['palette_upload'] = gr.File(
+                        label="Add colors from image or text file",
+                        file_count="single",
+                        type="filepath",
+                        scale=1
                     )
-                    # Error message display (red text, positioned between textbox and file input)
-                    components['palette_message'] = gr.HTML(value="", visible=False)
-                    with gr.Row():
-                        components['palette_upload'] = gr.File(
-                            label="Add colors from image or text file",
-                            file_count="single",
-                            type="filepath",
-                            scale=1
-                        )
-                    # Connect file upload to automatically append to text and clear file input
-                    components['palette_upload'].change(
-                        fn=on_palette_upload,
-                        inputs=[components['palette_upload'], components['palette_text']],
-                        outputs=[components['palette_text'], components['palette_upload'], components['palette_message']]
-                    )
-                components['dither_method_palette'] = gr.Radio(choices=dither_methods, value=dither_methods[0], label='Colors dither method')
+                # Connect file upload to automatically append to text and clear file input
+                components['palette_upload'].change(
+                    fn=on_palette_upload,
+                    inputs=[components['palette_upload'], components['palette_text']],
+                    outputs=[components['palette_text'], components['palette_upload'], components['palette_message']]
+                )
+                components['dither_method_palette'] = gr.Radio(choices=dither_methods, value=dither_methods[0], label='Colors dither method', interactive=True)
+        
+        # Update state when tab changes - use SelectData to get the selected tab index
+        def update_tab_state(evt: gr.SelectData):
+            return evt.index
+        
+        tabs.select(fn=update_tab_state, inputs=[], outputs=[components['active_tab']])
 
     return components
 
@@ -168,29 +181,24 @@ def process_image(
     original_image,
     downscale,
     need_rescale,
-    enable_color_limit,
+    active_tab,
     number_of_colors,
     quantization_method,
     dither_method,
     use_k_means,
-    is_grayscale,
     number_of_shades,
     quantization_method_grayscale,
     dither_method_grayscale,
     use_k_means_grayscale,
-    use_color_palette,
     palette_text,
     dither_method_palette,
-    is_black_and_white,
     is_inversed_black_and_white,
     black_and_white_threshold
 ):
-    dither = DITHER_METHODS[dither_method]
-    quantize = QUANTIZATION_METHODS[quantization_method]
-    dither_grayscale = DITHER_METHODS[dither_method_grayscale]
-    quantize_grayscale = QUANTIZATION_METHODS[quantization_method_grayscale]
-    dither_palette = DITHER_METHODS[dither_method_palette]
-
+    # Determine which processing to apply based on active tab
+    # active_tab is a Gradio Tabs component - use its selected property or default to first tab
+    # For now, we'll use a simple approach: check which tab's ID matches
+    
     original_width, original_height = original_image.size
 
     if original_image.mode != "RGB":
@@ -200,7 +208,43 @@ def process_image(
 
     new_image = downscale_image(new_image, downscale)
 
-    if use_color_palette:
+    # Apply processing based on active tab
+    # active_tab can be tab index (int) or tab ID (string)
+    # Tabs: None (0/none), From current image (1/color), Grayscale (2/grayscale), 
+    #       Black and white (3/black_and_white), Custom (4/custom_palette)
+    
+    if active_tab == 0 or active_tab == "none":
+        # No color palette clamping - just return the downscaled image
+        pass
+    
+    elif active_tab == 1 or active_tab == "color":  # From current image tab
+        dither = DITHER_METHODS[dither_method]
+        quantize = QUANTIZATION_METHODS[quantization_method]
+        new_image = limit_colors(
+            image=new_image,
+            limit=int(number_of_colors),
+            quantize=quantize,
+            dither=dither,
+            use_k_means=use_k_means
+        )
+    
+    elif active_tab == 2 or active_tab == "grayscale":  # Grayscale tab
+        dither_grayscale = DITHER_METHODS[dither_method_grayscale]
+        quantize_grayscale = QUANTIZATION_METHODS[quantization_method_grayscale]
+        new_image = convert_to_grayscale(new_image)
+        new_image = limit_colors(
+            image=new_image,
+            limit=int(number_of_shades),
+            quantize=quantize_grayscale,
+            dither=dither_grayscale,
+            use_k_means=use_k_means_grayscale
+        )
+    
+    elif active_tab == 3 or active_tab == "black_and_white":  # Black and white tab
+        new_image = convert_to_black_and_white(new_image, black_and_white_threshold, is_inversed_black_and_white)
+    
+    elif active_tab == 4 or active_tab == "custom_palette":  # Custom palette tab
+        dither_palette = DITHER_METHODS[dither_method_palette]
         palette_to_use = None
 
         # Try to get colors from text input
@@ -218,28 +262,6 @@ def process_image(
                 palette=palette_to_use,
                 dither=dither_palette
             )
-
-    if is_black_and_white:
-        new_image = convert_to_black_and_white(new_image, black_and_white_threshold, is_inversed_black_and_white)
-
-    if is_grayscale:
-        new_image = convert_to_grayscale(new_image)
-        new_image = limit_colors(
-            image=new_image,
-            limit=int(number_of_shades),
-            quantize=quantize_grayscale,
-            dither=dither_grayscale,
-            use_k_means=use_k_means_grayscale
-        )
-
-    if enable_color_limit:
-        new_image = limit_colors(
-            image=new_image,
-            limit=int(number_of_colors),
-            quantize=quantize,
-            dither=dither,
-            use_k_means=use_k_means
-        )
 
     if need_rescale:
         new_image = resize_image(new_image, (original_width, original_height))
