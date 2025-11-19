@@ -138,9 +138,28 @@ def create_palette_from_colors(rgb_colors: list, size: int = None) -> Image.Imag
     return palette_img
 
 
-def downscale_image(image: Image, scale: int) -> Image:
+def downscale_image(image: Image, scale: int, method: str = "NEAREST") -> Image:
+    """
+    Downscale image by scale factor using specified resampling method.
+    
+    Args:
+        image: PIL Image to downscale
+        scale: Downscale factor (e.g., 4 means 1/4 size)
+        method: Resampling method name (e.g., "NEAREST", "BOX", "BILINEAR", "BICUBIC", "LANCZOS")
+    
+    Returns:
+        Downscaled PIL Image
+    """
     width, height = image.size
-    downscaled_image = image.resize((int(width / scale), int(height / scale)), Image.NEAREST)
+    
+    # Get the resampling method from PIL.Image.Resampling enum
+    try:
+        resample = getattr(Image.Resampling, method.upper())
+    except AttributeError:
+        # Fallback to NEAREST if method not found
+        resample = Image.Resampling.NEAREST
+    
+    downscaled_image = image.resize((int(width / scale), int(height / scale)), resample)
     return downscaled_image
 
 

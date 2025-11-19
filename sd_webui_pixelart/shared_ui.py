@@ -12,6 +12,9 @@ from sd_webui_pixelart.utils import (
     parse_color_text, create_palette_from_colors, read_palette_file
 )
 
+# Get available resampling methods from PIL
+RESAMPLE_METHODS = [name for name in dir(Image.Resampling) if not name.startswith('_')]
+
 def _colors_to_hex_text(colors):
     return ", ".join([f"#{r:02X}{g:02X}{b:02X}" for r, g, b in colors])
 
@@ -93,6 +96,12 @@ def create_pixelart_ui(open_accordion=False, label="Pixel art"):
         
         with gr.Row():
             components['downscale'] = gr.Slider(label="Downscale", minimum=1, maximum=64, step=1, value=4)
+            components['downscale_method'] = gr.Dropdown(
+                choices=[(name.title(), name) for name in RESAMPLE_METHODS],
+                value="NEAREST",
+                label="Downscale method"
+            )
+        with gr.Row():
             components['need_rescale'] = gr.Checkbox(label="Rescale to original size", value=False)
         
         gr.Markdown("**Color palette clamping method:**")
@@ -180,6 +189,7 @@ def extract_process_params(**all_params):
 def process_image(
     original_image,
     downscale,
+    downscale_method,
     need_rescale,
     active_tab,
     number_of_colors,
@@ -206,7 +216,7 @@ def process_image(
     else:
         new_image = original_image
 
-    new_image = downscale_image(new_image, downscale)
+    new_image = downscale_image(new_image, downscale, downscale_method)
 
     # Apply processing based on active tab
     # active_tab can be tab index (int) or tab ID (string)
